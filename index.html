@@ -42,11 +42,14 @@
       let store = {}
 
       function loadData() {
-        let promise = d3.csv('routes.csv');
-        return promise.then(routes => {
-          store.routes = routes;
-          return store;
-        })
+        return Promise.all([
+          d3.csv('routes.csv'),
+          d3.json('countries.geo.json'),
+        ]).then(datasets => {
+          store.routes = datasets[0];
+          store.geoJSON = datasets[1];
+          return store
+        });
       }
 
       function groupByAirline(data) {
@@ -145,11 +148,53 @@
         drawAxesAirlinesChart(airlines, scales, config);
       }
 
+      function getMapConfig() {
+        let width = 600;
+        let height = 400;
+        let container = d3.select('#Map');
+        container
+          .attr('width', width)
+          .attr('height', height)
+
+        return {width, height, container}
+      }
+
+      function getMapProjection(config) {
+        let {width, height} = config;
+        let projection = d3.geoMercator();
+        projection
+          .scale(97)
+          .translate([width/2, height/2 + 20])
+
+        store.mapProjection = projection;
+        return projection
+      }
+
+      function drawBaseMap(container, countries, projection) {
+        let path = d3.geoPath()
+          .projection(projection);
+
+        container.selectAll('path')
+          .data(countries)
+          .enter()
+          .append('path')
+          .attr('d', d => path(d))
+          .attr('stroke', '#ccc')
+          .attr('fill', '#eee')
+      }
+
+      function drawMap(geoJSON) {
+        let config = getMapConfig();
+        let projection = getMapProjection(config);
+        drawBaseMap(config.container, geoJSON.features, projection);
+      }
+
       function showData() {
         let routes = store.routes;
         let airlines = groupByAirline(store.routes);
         console.log(airlines);
         drawAirlinesChart(airlines);
+        drawMap(store.geoJSON);
       }
 
       loadData().then(showData);
