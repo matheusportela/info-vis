@@ -189,12 +189,62 @@
         drawBaseMap(config.container, geoJSON.features, projection);
       }
 
+      function groupByAirport(data) {
+        let result = data.reduce((result, d) => {
+          let currentDest = result[d.DestAirportID] || {
+            "AirportID": d.DestAirportID,
+            "Airport": d.DestAirport,
+            "Latitude": +d.DestLatitude,
+            "Longitude": +d.DestLongitude,
+            "City": d.DestCity,
+            "Count": 0
+          }
+          currentDest.Count += 1;
+          result[d.DestAirportID] = currentDest;
+
+          let currentSource = result[d.SourceAirportID] || {
+            "AirportID": d.SourceAirportID,
+            "Airport": d.SourceAirport,
+            "Latitude": +d.SourceLatitude,
+            "Longitude": +d.SourceLongitude,
+            "City": d.SourceCity,
+            "Count": 0
+          }
+          currentSource.Count += 1;
+          result[d.SourceAirportID] = currentSource;
+
+          return result;
+        }, {})
+
+        result = Object.keys(result).map(key => result[key]);
+        return result;
+      }
+
+      function drawAirports(airports) {
+        let config = getMapConfig();
+        let projection = getMapProjection(config);
+        let container = config.container;
+
+        let circles = container.selectAll('circle');
+        circles
+          .data(airports)
+          .enter()
+          .append('circle')
+          .attr('r', 1)
+          .attr('cx', d => projection([d.Longitude, d.Latitude])[0])
+          .attr('cy', d => projection([d.Longitude, d.Latitude])[1])
+          .attr('fill', '#2a5599')
+      }
+
       function showData() {
         let routes = store.routes;
         let airlines = groupByAirline(store.routes);
         console.log(airlines);
         drawAirlinesChart(airlines);
         drawMap(store.geoJSON);
+
+        let airports = groupByAirport(store.routes);
+        drawAirports(airports)
       }
 
       loadData().then(showData);
