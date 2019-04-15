@@ -32,6 +32,10 @@
       .tick {
         font-size: 12px;
       }
+
+      .grid {
+        stroke-opacity: 0.25;
+      }
     </style>
     <script src="https://d3js.org/d3.v5.min.js"></script>
   </head>
@@ -77,7 +81,27 @@
         }, {})
 
         result = Object.keys(result).map(key => result[key])
-        result = result.sort((r1, r2) => d3.descending(d3.max([r1.donated_amount, r1.received_amount]), d3.max([r2.donated_amount, r2.received_amount])))
+
+        // result = result.sort((r1, r2) => d3.descending(d3.max([r1.donated_amount, r1.received_amount]), d3.max([r2.donated_amount, r2.received_amount])))
+
+        // result = result.sort((r1, r2) => d3.descending(r1.donated_amount - r1.received_amount, r2.donated_amount - r2.received_amount))
+
+        result = result.sort(function (r1, r2) {
+          var max_r1, max_r2
+
+          if (r1.donated_amount >= r1.received_amount)
+            max_r1 = r1.donated_amount
+          else
+            max_r1 = -r1.received_amount
+
+          if (r2.donated_amount >= r2.received_amount)
+            max_r2 = r2.donated_amount
+          else
+            max_r2 = -r2.received_amount
+
+          return d3.descending(max_r1, max_r2)
+        })
+
         return result
       }
 
@@ -103,13 +127,18 @@
       }
 
       function getCountriesChartScales(countries, config) {
-        let {bodyWidth, bodyHeight} = config;
-        let maximumDonatedAmount = d3.max(countries, d => d.donated_amount);
-        let maximumReceivedAmount = d3.max(countries, d => d.received_amount);
-        let maximumAmount = d3.max([maximumDonatedAmount, maximumReceivedAmount])
+        let {bodyWidth, bodyHeight} = config
+        let maximumDonatedAmount = d3.max(countries, d => d.donated_amount)
+        let maximumReceivedAmount = d3.max(countries, d => d.received_amount)
+        // let maximumAmount = d3.max([maximumDonatedAmount, maximumReceivedAmount])
+        let maximumAmount = 150000000000
 
         let xScale = d3.scaleLinear()
           .range([0, bodyWidth])
+          .domain([-maximumAmount, maximumAmount])
+
+        let xBarScale = d3.scaleLinear()
+          .range([0, bodyWidth/2])
           .domain([0, maximumAmount])
 
         let yScale = d3.scaleBand()
@@ -122,12 +151,12 @@
           .domain(['donated', 'received'])
           .padding(0.2)
 
-        return {xScale, yScale, yBarCategoryScale}
+        return {xScale, xBarScale, yScale, yBarCategoryScale}
       }
 
       function drawBarsCountriesChart(countries, scales, config) {
-        let {margin, container} = config;
-        let {xScale, yScale, yBarCategoryScale} = scales;
+        let {margin, container} = config
+        let {xScale, xBarScale, yScale, yBarCategoryScale} = scales
         let body = container.append('g')
           .style('transform', `translate(${margin.left}px, ${margin.top}px)`)
 
@@ -135,26 +164,26 @@
           .data(countries)
 
         bars.enter().append('rect')
-          .attr('height', yBarCategoryScale.bandwidth())
-          .attr('y', d => yBarCategoryScale('donated'))
-          .attr('width', d => xScale(d.donated_amount))
+          .attr('height', yScale.bandwidth())
+          .attr('x', xScale(0))
+          .attr('y', d => yScale(d.country))
+          .attr('width', d => xBarScale(d.donated_amount))
           .attr('fill', '#377eb8')
-          .style('transform', d => `translate(0px, ${yScale(d.country)}px)`)
 
         bars.enter().append('rect')
-          .attr('height', yBarCategoryScale.bandwidth())
-          .attr('y', d => yBarCategoryScale('received'))
-          .attr('width', d => xScale(d.received_amount))
+          .attr('height', yScale.bandwidth())
+          .attr('x', d => xScale(0) - xBarScale(d.received_amount))
+          .attr('y', d => yScale(d.country))
+          .attr('width', d => xBarScale(d.received_amount))
           .attr('fill', '#e41a1c')
-          .style('transform', d => `translate(0px, ${yScale(d.country)}px)`)
       }
 
       function drawAxesCountriesChart(countries, scales, config) {
-        let {xScale, yScale} = scales;
-        let {container, margin, height} = config;
+        let {xScale, yScale} = scales
+        let {container, margin, height} = config
         let axisX = d3.axisBottom(xScale)
           .ticks(5)
-          .tickFormat(d => d/1e9)
+          .tickFormat(d => `$${Math.abs(d)/1e9}B`)
 
         container.append('g')
           .style('transform', `translate(${margin.left}px, ${height - margin.bottom}px)`)
@@ -164,10 +193,17 @@
         container.append('g')
           .style('transform', `translate(${margin.left}px, ${margin.top}px)`)
           .call(axisY)
+
+        container.append('g')
+          .attr('class', 'grid')
+          .attr('transform', `translate(${margin.left}, ${height - margin.bottom})`)
+          .call(axisX
+            .tickSize(-height+margin.top+margin.bottom, 0, 0)
+            .tickFormat(''))
       }
 
       function drawLegendCountriesChart(countries, scales, config) {
-        let {container, width, height} = config;
+        let {container, width, height} = config
 
         let legendRectSize = 10
         let legendSpacing = 4
@@ -208,7 +244,7 @@
       function showData() {
         let aiddata = store.aiddata
         let countries = groupByCountry(store.aiddata)
-        drawCountriesChart(countries);
+        drawCountriesChart(countries)
       }
 
       loadData().then(showData)
