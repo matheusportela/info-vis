@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      body {
+        font-family: Helvetica, Arial, sans-serif
+      }
+
+      h1 {
+        background-color: #2a5599;
+        color: white;
+        padding: 5px;
+        text-align: center;
+      }
+
+      svg {
+        border: 1px solid;
+      }
+
+      .container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    </style>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+  </head>
+
+  <body>
+    <h1>Received and Donated Amounts</h1>
+    <div class="container">
+      <svg id="countries-chart"></svg>
+    </div>
+
+    <script type="text/javascript">
+      let store = {}
+
+      function loadData() {
+        return Promise.all([
+          d3.csv('aiddata-countries-only.csv'),
+        ]).then(datasets => {
+          store.aiddata = datasets[0]
+          return store
+        })
+      }
+
+      function groupByCountry(data) {
+        let result = data.reduce((result, d) => {
+          let currentDonor = result[d.donor] || {
+            'country': d.donor,
+            'donated_amount': 0,
+            'received_amount': 0
+          }
+          let currentRecipient = result[d.recipient] || {
+            'country': d.recipient,
+            'donated_amount': 0,
+            'received_amount': 0
+          }
+
+          currentDonor.donated_amount += +d.commitment_amount_usd_constant
+          currentRecipient.received_amount += +d.commitment_amount_usd_constant
+
+          result[d.donor] = currentDonor
+          result[d.recipient] = currentRecipient
+
+          return result
+        }, {})
+
+        result = Object.keys(result).map(key => result[key])
+        result = result.sort((r1, r2) => d3.descending(d3.max([r1.donated_amount, r1.received_amount]), d3.max([r2.donated_amount, r2.received_amount])))
+        return result
+      }
+
+      function getCountriesChartConfig() {
+        let width = 700
+        let height = 800
+        let margin = {
+          top: 10,
+          bottom: 50,
+          left: 130,
+          right: 10
+        }
+
+        let bodyHeight = height - margin.top - margin.bottom
+        let bodyWidth = width - margin.left - margin.right
+
+        let container = d3.select('#countries-chart')
+        container
+          .attr('width', width)
+          .attr('height', height)
+
+        return {width, height, margin, bodyHeight, bodyWidth, container}
+      }
+
+      function getCountriesChartScales(countries, config) {
+        let {bodyWidth, bodyHeight} = config;
+        let maximumDonatedAmount = d3.max(countries, d => d.donated_amount);
+        let maximumReceivedAmount = d3.max(countries, d => d.received_amount);
+        let maximumAmount = d3.max([maximumDonatedAmount, maximumReceivedAmount])
+
+        let xScale = d3.scaleLinear()
+          .range([0, bodyWidth])
+          .domain([0, maximumAmount])
+
+        let yScale = d3.scaleBand()
+          .range([0, bodyHeight])
+          .domain(countries.map(d => d.country))
+          .padding(0.2)
+
+        let yCategoryScale = d3.scaleBand()
+          .range([0, yScale.bandwidth()])
+          .domain(['donated', 'received'])
+          .padding(0.2)
+
+        return {xScale, yScale, yCategoryScale}
+      }
+
+      function drawBarsCountriesChart(countries, scales, config) {
+        let {margin, container} = config;
+        let {xScale, yScale, yCategoryScale} = scales;
+        let body = container.append('g')
+          .style('transform', `translate(${margin.left}px, ${margin.top}px)`)
+
+        let bars = body.selectAll('.bar')
+          .data(countries)
+
+        bars.enter().append('rect')
+          .attr('height', yCategoryScale.bandwidth())
+          .attr('y', d => yCategoryScale('donated'))
+          .attr('width', d => xScale(d.donated_amount))
+          .attr('fill', '#2a5599')
+          .style('transform', d => `translate(0px, ${yScale(d.country)}px)`)
+
+        bars.enter().append('rect')
+          .attr('height', yCategoryScale.bandwidth())
+          .attr('y', d => yCategoryScale('received'))
+          .attr('width', d => xScale(d.received_amount))
+          .attr('fill', '#f00')
+          .style('transform', d => `translate(0px, ${yScale(d.country)}px)`)
+      }
+
+      function drawAxesCountriesChart(countries, scales, config) {
+        let {xScale, yScale} = scales;
+        let {container, margin, height} = config;
+        let axisX = d3.axisBottom(xScale)
+          .ticks(5)
+          .tickFormat(d => d/1e9)
+
+        container.append('g')
+          .style('transform', `translate(${margin.left}px, ${height - margin.bottom}px)`)
+          .call(axisX)
+
+        let axisY = d3.axisLeft(yScale)
+        container.append('g')
+          .style('transform', `translate(${margin.left}px, ${margin.top}px)`)
+          .call(axisY)
+      }
+
+      function drawCountriesChart(countries) {
+        let config = getCountriesChartConfig()
+        let scales = getCountriesChartScales(countries, config)
+        drawBarsCountriesChart(countries, scales, config)
+        drawAxesCountriesChart(countries, scales, config)
+      }
+
+      function showData() {
+        let aiddata = store.aiddata
+        let countries = groupByCountry(store.aiddata)
+        drawCountriesChart(countries);
+      }
+
+      loadData().then(showData)
+    </script>
+  </body>
+</html>
