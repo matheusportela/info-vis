@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      body {
+        font-family: Helvetica, Arial, sans-serif
+      }
+
+      h1 {
+        background-color: #2a5599;
+        color: white;
+        padding: 5px;
+        text-align: center;
+      }
+
+      .container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .legend {
+        font-size: 12px;
+      }
+
+      .tick {
+        font-size: 12px;
+      }
+
+      .grid {
+        stroke-opacity: 0.25;
+      }
+    </style>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+  </head>
+
+  <body>
+    <h1>Recipients and Donors Map</h1>
+    <div class="container">
+      <svg id="countries-chart"></svg>
+    </div>
+
+    <script type="text/javascript">
+      let store = {}
+
+      function loadData() {
+        return Promise.all([
+          d3.csv('aiddata-countries-only.csv'),
+          d3.json('countries.geo.json'),
+        ]).then(datasets => {
+          store.aiddata = datasets[0]
+          store.geoJSON = datasets[1]
+          return store
+        })
+      }
+
+      function groupByCountry(aidData, geoJSON) {
+        let result = aidData.reduce((result, d) => {
+          let currentDonor = result[d.donor] || {
+            'country': d.donor,
+            'donated_amount': 0,
+            'received_amount': 0,
+            'geo': geoJSON.features.filter(f => f.properties.name == d.donor)[0]
+          }
+          let currentRecipient = result[d.recipient] || {
+            'country': d.recipient,
+            'donated_amount': 0,
+            'received_amount': 0,
+            'geo': geoJSON.features.filter(f => f.properties.name == d.recipient)[0]
+          }
+
+          currentDonor.donated_amount += +d.commitment_amount_usd_constant
+          currentRecipient.received_amount += +d.commitment_amount_usd_constant
+
+          result[d.donor] = currentDonor
+          result[d.recipient] = currentRecipient
+
+          return result
+        }, {})
+
+        result = Object.keys(result).map(key => result[key])
+
+        return result
+      }
+
+      function getCountriesChartConfig() {
+        let width = 1700
+        let height = 850
+        let margin = {
+          top: 10,
+          bottom: 10,
+          left: 10,
+          right: 10
+        }
+
+        let bodyHeight = height - margin.top - margin.bottom
+        let bodyWidth = width - margin.left - margin.right
+
+        let container = d3.select('#countries-chart')
+        container
+          .attr('width', width)
+          .attr('height', height)
+
+        return {width, height, margin, bodyHeight, bodyWidth, container}
+      }
+
+      function getMapProjection(config) {
+        let {width, height} = config
+        let projection = d3.geoNaturalEarth1()
+        projection
+          .scale(300)
+          .translate([width/2, height/2 + 20])
+
+        store.mapProjection = projection
+        return projection
+      }
+
+      function getMapScales(countries) {
+        let maximumDonatedAmount = d3.max(countries, d => d.donated_amount)
+        let maximumReceivedAmount = d3.max(countries, d => d.received_amount)
+        let maximumAmount = d3.max([maximumDonatedAmount, maximumReceivedAmount])
+
+        let circleScale = d3.scaleLinear()
+          .range([0, 25])
+          .domain([0, maximumAmount])
+
+        return {circleScale}
+      }
+
+      function drawMap(countries, geoJSON) {
+        let config = getCountriesChartConfig()
+        let {circleScale} = getMapScales(countries)
+        let projection = getMapProjection(config)
+        let path = d3.geoPath()
+          .projection(projection)
+
+        let container = config.container
+        let centroids = geoJSON.features.map(d => path.centroid(d))
+        console.log(geoJSON.features)
+
+        container.selectAll('path')
+          .data(geoJSON.features)
+          .enter()
+          .append('path')
+          .attr('d', d => path(d))
+          .attr('stroke', '#ccc')
+          .attr('fill', '#eee')
+
+        container.selectAll('donated-circle')
+          .data(countries.filter(d => d.geo))
+          .enter()
+          .append('circle')
+          .attr('r', d => circleScale(d.donated_amount))
+          .attr('cx', d => path.centroid(d.geo)[0])
+          .attr('cy', d => path.centroid(d.geo)[1])
+          .attr('fill', '#00f')
+          .attr('opacity', 0.5)
+
+        container.selectAll('received-circle')
+          .data(countries.filter(d => d.geo))
+          .enter()
+          .append('circle')
+          .attr('r', d => circleScale(d.received_amount))
+          .attr('cx', d => path.centroid(d.geo)[0])
+          .attr('cy', d => path.centroid(d.geo)[1])
+          .attr('fill', '#f00')
+          .attr('opacity', 0.5)
+      }
+
+      function showData() {
+        let countries = groupByCountry(store.aiddata, store.geoJSON)
+        drawMap(countries, store.geoJSON);
+      }
+
+      loadData().then(showData)
+    </script>
+  </body>
+</html>
