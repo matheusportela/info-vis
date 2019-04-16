@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <style>
       body {
-        font-family: Helvetica, Arial, sans-serif
+        font-family: Helvetica, Arial, sans-serif;
       }
 
       h1 {
         background-color: #2a5599;
-        color: white;
+        color: #fafafa;
         padding: 5px;
         text-align: center;
       }
@@ -22,21 +22,19 @@
 
       .legend {
         font-size: 12px;
+        color: #616161;
+        font-weight: bold;
       }
 
       .tick {
         font-size: 10px;
-      }
-
-      .grid {
-        stroke-opacity: 0.25;
       }
     </style>
     <script src="https://d3js.org/d3.v5.min.js"></script>
   </head>
 
   <body>
-    <h1>Net Donated and Received Map</h1>
+    <h1>Map of Donated and Received Amounts</h1>
     <div class="container">
       <svg id="countries-chart"></svg>
     </div>
@@ -56,18 +54,18 @@
       }
 
       function groupByCountry(aidData, geoJSON) {
-        let result_map = aidData.reduce((result, d) => {
+        let result = aidData.reduce((result, d) => {
           let currentDonor = result[d.donor] || {
             'country': d.donor,
             'donated_amount': 0,
             'received_amount': 0,
-            'geo': geoJSON.features.filter(f => f.properties.name == d.donor)[0]
+            'geo': geoJSON.features.find(f => f.properties.name == d.donor)
           }
           let currentRecipient = result[d.recipient] || {
             'country': d.recipient,
             'donated_amount': 0,
             'received_amount': 0,
-            'geo': geoJSON.features.filter(f => f.properties.name == d.recipient)[0]
+            'geo': geoJSON.features.find(f => f.properties.name == d.recipient)
           }
 
           currentDonor.donated_amount += +d.commitment_amount_usd_constant
@@ -79,20 +77,14 @@
           return result
         }, {})
 
-        store.countries_map = result_map
-
-        result_list = Object.keys(result_map).map(key => result_map[key])
-
-        store.countries_list = result_list
-
-        return result_list
+        return result
       }
 
-      function getCountriesChartConfig() {
+      function getMapConfig() {
         let width = 1500
         let height = 850
         let margin = {
-          top: 20,
+          top: 10,
           bottom: 10,
           left: 10,
           right: 10
@@ -101,141 +93,149 @@
         let bodyHeight = height - margin.top - margin.bottom
         let bodyWidth = width - margin.left - margin.right
 
+        let legendPosition = {
+          x: 900,
+          y: 725
+        }
+
         let container = d3.select('#countries-chart')
         container
           .attr('width', width)
           .attr('height', height)
 
-        return {width, height, margin, bodyHeight, bodyWidth, container}
+        return {width, height, margin, bodyHeight, bodyWidth, legendPosition, container}
       }
 
       function getMapProjection(config) {
-        let {width, height} = config
+        let {margin, bodyWidth, bodyHeight} = config
         let projection = d3.geoNaturalEarth1()
         projection
           .scale(300)
-          .translate([width/2, height/2 + 20])
+          .translate([bodyWidth/2, bodyHeight/2 + margin.top])
 
         store.mapProjection = projection
         return projection
       }
 
-      function getMapScales(countries) {
-        let maximumDonatedAmount = d3.max(countries, d => d.donated_amount)
-        let maximumReceivedAmount = d3.max(countries, d => d.received_amount)
-        let maximumAmount = d3.max([maximumDonatedAmount, maximumReceivedAmount])
+      function getChoroplethMapScales() {
+        let divergingDomain = [1e12, 100e9, 10e9, 1e9, 0, 1e9, 10e9, 100e9, 1e12]
+        let divergingRange = ['#d73027', '#f46d43', '#fdae61', '#fee090', '#e0f3f8','#abd9e9','#74add1','#4575b4']
 
-        let circleScale = d3.scaleLinear()
-          .range([0, 25])
-          .domain([0, maximumAmount])
+        let thresholds = divergingDomain.slice(1, Math.floor(divergingDomain.length/2)).reverse()
+        console.log(thresholds)
 
-        return {circleScale}
+        let donatedColorScale = d3.scaleThreshold()
+          .range(divergingRange.slice(Math.floor(divergingDomain.length/2)))
+          .domain(thresholds)
+
+        let receivedColorScale = d3.scaleThreshold()
+          .range(divergingRange.slice(0, Math.floor(divergingDomain.length/2)).reverse())
+          .domain(thresholds)
+
+        return {donatedColorScale, receivedColorScale, thresholds, divergingDomain, divergingRange}
       }
 
-      function drawDonationMap(geoJSON) {
-        let config = getCountriesChartConfig()
+      function drawMap(countries, geoJSON) {
+        let config = getMapConfig()
         let container = config.container
+        let {donatedColorScale, receivedColorScale} = getChoroplethMapScales()
         let projection = getMapProjection(config)
         let path = d3.geoPath()
           .projection(projection)
 
-        let thresholds = [1e9, 10e9, 100e9]
-        let donatedColorScale = d3.scaleThreshold()
-          .range(d3.schemeBlues[thresholds.length + 1])
-          .domain(thresholds)
-        let receivedColorScale = d3.scaleThreshold()
-          .range(d3.schemeReds[thresholds.length + 1])
-          .domain(thresholds)
+        let strokeColor = '#bdbdbd'
+        let countryDefaultColor = '#fafafa'
 
         container.selectAll('path')
           .data(geoJSON.features)
           .enter()
           .append('path')
           .attr('d', d => path(d))
-          .attr('stroke', '#e0e0e0')
+          .attr('stroke', strokeColor)
           .attr('fill', function(d) {
-            country = store.countries_map[d.properties.name]
+            country = countries[d.properties.name]
             if (country) {
               let netValue = country.donated_amount - country.received_amount
-              let color = (netValue > 0) ? donatedColorScale(netValue) : receivedColorScale(-netValue)
-
-              if (d.properties.name == "Australia") {
-                console.log(netValue, country.donated_amount, country.received_amount)
-              }
-              return color
+              if (netValue >= 0)
+                return donatedColorScale(netValue)
+              else if (netValue < 0)
+                return receivedColorScale(-netValue)
             } else {
-              return '#fafafa'
+              return countryDefaultColor
             }
           })
+      }
 
-        // Legend
-        const width = 260
-        const length = donatedColorScale.range().length
+      function drawLegend() {
+        let {container, legendPosition} = getMapConfig()
+        let {donatedColorScale, receivedColorScale, divergingDomain, divergingRange} = getChoroplethMapScales()
+
+        const width = 500
+        const rectHeight = 8
+        const titlePadding = 6
+        const tickSize = 12
 
         const x = d3.scaleLinear()
-            .domain([1, length - 1])
-            .rangeRound([width / length, width * (length - 1) / length])
+          .domain([0, divergingDomain.length-1])
+          .rangeRound([0, width])
 
         let legend = container
           .append('g')
           .attr('class', 'legend')
-          .attr('transform', `translate(900, 750)`)
+          .attr('transform', `translate(${legendPosition.x}, ${legendPosition.y})`)
 
-        let donated = legend.append('g')
-          .attr('transform', `translate(${width}, 0)`)
+        let colorLegend = legend.append('g')
 
-        donated.selectAll('rect')
-          .data(donatedColorScale.range())
+        colorLegend.selectAll('rect')
+          .data(divergingRange)
           .join('rect')
-            .attr('height', 8)
+            .attr('height', rectHeight)
             .attr('x', (d, i) => x(i))
             .attr('width', (d, i) => x(i + 1) - x(i))
             .attr('fill', d => d)
 
-        donated.append('text')
-            .attr('y', -6)
-            .attr('x', width)
-            .attr('fill', 'currentColor')
-            .attr('text-anchor', 'end')
-            .attr('font-weight', 'bold')
-            .text('Donated amount')
+        colorLegend.append('text')
+          .attr('class', 'title-left')
+          .attr('y', -titlePadding)
+          .attr('text-anchor', 'start')
+          .attr('fill', 'currentColor')
+          .text('Net Received Amount')
 
-        donated.call(d3.axisBottom(x)
-            .tickSize(13)
-            .tickFormat(i => `$${donatedColorScale.domain()[i - 1]/1e9}B`)
-            .tickValues(d3.range(1, length)))
-          .select('.domain')
-            .remove()
+        colorLegend.append('text')
+          .attr('class', 'title-right')
+          .attr('x', width)
+          .attr('y', -titlePadding)
+          .attr('text-anchor', 'end')
+          .attr('fill', 'currentColor')
+          .text('Net Donated Amount')
 
-        let received = legend.append('g')
+        colorLegend.call(d3.axisBottom(x)
+            .tickFormat(function(i) {
+              let value = divergingDomain[i]
+              let formattedValue
 
-        received.selectAll('rect')
-          .data(receivedColorScale.range().reverse())
-          .join('rect')
-            .attr('height', 8)
-            .attr('x', (d, i) => x(i))
-            .attr('width', (d, i) => x(i + 1) - x(i))
-            .attr('fill', d => d)
+              if (value >= 1e12)
+                formattedValue = `$${value/1e12}T`
+              else if (value >= 1e9)
+                formattedValue = `$${value/1e9}B`
+              else if (value >= 1e6)
+                formattedValue = `$${value/1e6}M`
+              else if (value >= 1e3)
+                formattedValue = `$${value/1e3}K`
+              else
+                formattedValue = `$${value}`
 
-        received.append('text')
-            .attr('y', -6)
-            .attr('fill', 'currentColor')
-            .attr('text-anchor', 'start')
-            .attr('font-weight', 'bold')
-            .text('Received amount')
-
-        received.call(d3.axisBottom(x)
-            .tickSize(13)
-            .tickFormat(i => `$${receivedColorScale.domain().reverse()[i - 1]/1e9}B`)
-            .tickValues(d3.range(1, length)))
+              return formattedValue
+            })
+            .tickSize(tickSize))
           .select('.domain')
             .remove()
       }
 
       function showData() {
-        let countries_list = groupByCountry(store.aiddata, store.geoJSON)
-        console.log(store)
-        drawDonationMap(store.geoJSON)
+        let countries = groupByCountry(store.aiddata, store.geoJSON)
+        drawMap(countries, store.geoJSON)
+        drawLegend()
       }
 
       loadData().then(showData)
