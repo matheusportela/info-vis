@@ -47,7 +47,7 @@
           d3.csv('aiddata-countries-only.csv'),
           d3.json('countries.geo.json'),
         ]).then(datasets => {
-          store.aiddata = datasets[0]
+          store.aidData = datasets[0]
           store.geoJSON = datasets[1]
           return store
         })
@@ -233,7 +233,7 @@
       }
 
       function showData() {
-        let countries = groupByCountry(store.aiddata, store.geoJSON)
+        let countries = groupByCountry(store.aidData, store.geoJSON)
         drawMap(countries, store.geoJSON)
         drawLegend()
       }

@@ -48,7 +48,7 @@
         return Promise.all([
           d3.csv('aiddata-countries-only.csv'),
         ]).then(datasets => {
-          store.aiddata = datasets[0]
+          store.aidData = datasets[0]
           return store
         })
       }
@@ -237,8 +237,7 @@
       }
 
       function showData() {
-        let aiddata = store.aiddata
-        let countries = groupByCountry(store.aiddata)
+        let countries = groupByCountry(store.aidData)
         drawCountriesChart(countries)
       }
 
