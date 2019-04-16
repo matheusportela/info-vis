@@ -77,10 +77,6 @@
 
         result = Object.keys(result).map(key => result[key])
 
-        // result = result.sort((r1, r2) => d3.descending(d3.max([r1.donated_amount, r1.received_amount]), d3.max([r2.donated_amount, r2.received_amount])))
-
-        // result = result.sort((r1, r2) => d3.descending(r1.donated_amount - r1.received_amount, r2.donated_amount - r2.received_amount))
-
         result = result.sort(function (r1, r2) {
           var max_r1, max_r2
 

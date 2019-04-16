@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      body {
+        font-family: sans-serif;
+      }
+
+      h1 {
+        background-color: #2a5599;
+        color: #fafafa;
+        padding: 5px;
+        text-align: center;
+      }
+
+      .container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .legend {
+        font-size: 10px;
+        color: #616161;
+      }
+
+      .tick {
+        font-size: 10px;
+      }
+    </style>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+  </head>
+
+  <body>
+    <h1>Top 5 Donation Purposes</h1>
+    <div class="container">
+      <svg id="countries-chart"></svg>
+    </div>
+
+    <script type="text/javascript">
+      let store = {}
+
+      function loadData() {
+        return Promise.all([
+          d3.csv('aiddata-countries-only.csv'),
+          d3.json('countries.geo.json'),
+          d3.json('country_coordinates.json'),
+        ]).then(datasets => {
+          store.aidData = datasets[0]
+          store.geoJSON = datasets[1]
+          store.countryCoordinates = datasets[2]
+          return store
+        })
+      }
+
+      function findTopDonationPurposes(aidData, numPurposes) {
+        let result = aidData.reduce((result, d) => {
+          let donationPurpose = result[d.coalesced_purpose_name] || {
+            'purpose': d.coalesced_purpose_name,
+            'count': 0
+          }
+          donationPurpose.count += 1
+          result[d.coalesced_purpose_name] = donationPurpose
+          return result
+        }, {})
+
+        return Object.keys(result)
+          .map(key => result[key])
+          .filter(d => d.purpose != 'Sectors not specified')
+          .sort((r1, r2) => d3.descending(r1.count, r2.count))
+          .slice(0, numPurposes)
+          .map(d => d.purpose)
+      }
+
+      function groupByCountry(aidData, geoJSON, countryCoordinates) {
+        let topDonationPurposes = findTopDonationPurposes(aidData, 5)
+
+        let result = aidData.reduce((result, d) => {
+          if (!topDonationPurposes.find(p => p == d.coalesced_purpose_name))
+            return result
+
+          let coordinates = countryCoordinates.find(f => f.name == d.recipient)
+          let donation_purposes = topDonationPurposes.reduce((result, purpose) => {
+              result[purpose] = 0
+              return result
+            }, {})
+
+          let country = result[d.recipient] || {
+            'country': d.recipient,
+            'received_amount': 0,
+            'geo': geoJSON.features.find(f => f.properties.name == d.recipient),
+            'coordinates': coordinates.latlng.reverse(),
+            'donation_purposes': donation_purposes
+          }
+
+          country.received_amount += +d.commitment_amount_usd_constant
+          country.donation_purposes[d.coalesced_purpose_name] += 1
+
+          result[d.recipient] = country
+
+          return result
+        }, {})
+
+        result = Object
+          .keys(result)
+          .map(key => result[key])
+          .filter(c => c.geo)
+
+        return result
+      }
+
+      function getMapConfig() {
+        let width = 1500
+        let height = 850
+        let margin = {
+          top: 10,
+          bottom: 10,
+          left: 10,
+          right: 10
+        }
+
+        let bodyHeight = height - margin.top - margin.bottom
+        let bodyWidth = width - margin.left - margin.right
+
+        let legendPosition = {
+          x: 100,
+          y: 625
+        }
+
+        let container = d3.select('#countries-chart')
+        container
+          .attr('width', width)
+          .attr('height', height)
+
+        return {width, height, margin, bodyHeight, bodyWidth, legendPosition, container}
+      }
+
+      function getMapProjection(config) {
+        let {margin, bodyWidth, bodyHeight} = config
+        let projection = d3.geoNaturalEarth1()
+        projection
+          .scale(300)
+          .translate([bodyWidth/2, bodyHeight/2 + margin.top])
+
+        store.mapProjection = projection
+        return projection
+      }
+
+      function getMapScales(countries) {
+        let donationPurposes = Object.keys(countries[0].donation_purposes)
+        let colors = ['#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854']
+        let colorScale = d3.scaleOrdinal()
+            .domain(donationPurposes)
+            .range(colors)
+        return {colorScale, donationPurposes, colors}
+      }
+
+      function drawMap(countries, geoJSON) {
+        let config = getMapConfig()
+        let container = config.container
+        let projection = getMapProjection(config)
+        let path = d3.geoPath()
+          .projection(projection)
+        let {colorScale} = getMapScales(countries)
+
+        container.selectAll('path')
+          .data(geoJSON.features)
+          .enter()
+          .append('path')
+          .attr('d', d => path(d))
+          .attr('stroke', '#bdbdbd')
+          .attr('fill', '#fafafa')
+
+        for (let i = 0; i < countries.length; i++) {
+          let donationData = countries[i].donation_purposes
+          let coordinates = countries[i].coordinates
+          let pie = d3.pie()
+            .value(d => d.value)
+          let pieData = pie(d3.entries(donationData))
+          console.log(donationData)
+          console.log(pieData)
+
+          container.selectAll('country-pie')
+            .data(pieData)
+            .enter()
+            .append('path')
+            .attr('transform', (d, i) => `translate(${projection(coordinates)})`)
+            .attr('d', d3.arc()
+              .innerRadius(0)
+              .outerRadius(10)
+            )
+            .attr('fill', d => colorScale(d.data.key))
+            .style('stroke-width', 0)
+            .style('opacity', 0.9)
+        }
+      }
+
+      function drawLegend(countries) {
+        let {container, legendPosition} = getMapConfig()
+        let {colors, donationPurposes} = getMapScales(countries)
+
+        let legendRectSize = 10
+        let legendSpacing = 4
+
+        let legendData = []
+        for (let i = 0; i < donationPurposes.length; i++) {
+          legendData.push({color: colors[i], title: donationPurposes[i]})
+        }
+
+        let legend = container.selectAll('.legend')
+          .data(legendData)
+          .enter()
+          .append('g')
+          .attr('class', 'legend')
+          .attr('transform', function(d, i) {
+            let y = i*(legendRectSize + legendSpacing)
+            return `translate(${legendPosition.x}, ${legendPosition.y + y})`
+          })
+
+        legend.append('rect')
+          .attr('width', legendRectSize)
+          .attr('height', legendRectSize)
+          .style('fill', d => d.color)
+          .style('stroke', d => d.color)
+
+        legend.append('text')
+          .text(d => d.title)
+          .attr('x', legendRectSize + legendSpacing)
+          .attr('y', legendRectSize - legendSpacing/2)
+      }
+
+      function showData() {
+        let countries = groupByCountry(store.aidData, store.geoJSON, store.countryCoordinates)
+        console.log(countries)
+        drawMap(countries, store.geoJSON)
+        drawLegend(countries)
+      }
+
+      loadData().then(showData)
+    </script>
+  </body>
+</html>
