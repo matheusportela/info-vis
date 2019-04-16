@@ -25,7 +25,7 @@
       }
 
       .tick {
-        font-size: 12px;
+        font-size: 10px;
       }
 
       .grid {
@@ -36,7 +36,7 @@
   </head>
 
   <body>
-    <h1>Recipients and Donors Map</h1>
+    <h1>Net Donated and Received Map</h1>
     <div class="container">
       <svg id="countries-chart"></svg>
     </div>
@@ -56,7 +56,7 @@
       }
 
       function groupByCountry(aidData, geoJSON) {
-        let result = aidData.reduce((result, d) => {
+        let result_map = aidData.reduce((result, d) => {
           let currentDonor = result[d.donor] || {
             'country': d.donor,
             'donated_amount': 0,
@@ -79,16 +79,20 @@
           return result
         }, {})
 
-        result = Object.keys(result).map(key => result[key])
+        store.countries_map = result_map
 
-        return result
+        result_list = Object.keys(result_map).map(key => result_map[key])
+
+        store.countries_list = result_list
+
+        return result_list
       }
 
       function getCountriesChartConfig() {
-        let width = 1700
+        let width = 1500
         let height = 850
         let margin = {
-          top: 10,
+          top: 20,
           bottom: 10,
           left: 10,
           right: 10
@@ -128,49 +132,110 @@
         return {circleScale}
       }
 
-      function drawMap(countries, geoJSON) {
+      function drawDonationMap(geoJSON) {
         let config = getCountriesChartConfig()
-        let {circleScale} = getMapScales(countries)
+        let container = config.container
         let projection = getMapProjection(config)
         let path = d3.geoPath()
           .projection(projection)
 
-        let container = config.container
-        let centroids = geoJSON.features.map(d => path.centroid(d))
-        console.log(geoJSON.features)
+        let thresholds = [1e9, 10e9, 100e9]
+        let donatedColorScale = d3.scaleThreshold()
+          .range(d3.schemeBlues[thresholds.length + 1])
+          .domain(thresholds)
+        let receivedColorScale = d3.scaleThreshold()
+          .range(d3.schemeReds[thresholds.length + 1])
+          .domain(thresholds)
 
         container.selectAll('path')
           .data(geoJSON.features)
           .enter()
           .append('path')
           .attr('d', d => path(d))
-          .attr('stroke', '#ccc')
-          .attr('fill', '#eee')
+          .attr('stroke', '#e0e0e0')
+          .attr('fill', function(d) {
+            country = store.countries_map[d.properties.name]
+            if (country) {
+              let netValue = country.donated_amount - country.received_amount
+              let color = (netValue > 0) ? donatedColorScale(netValue) : receivedColorScale(-netValue)
 
-        container.selectAll('donated-circle')
-          .data(countries.filter(d => d.geo))
-          .enter()
-          .append('circle')
-          .attr('r', d => circleScale(d.donated_amount))
-          .attr('cx', d => path.centroid(d.geo)[0])
-          .attr('cy', d => path.centroid(d.geo)[1])
-          .attr('fill', '#00f')
-          .attr('opacity', 0.5)
+              if (d.properties.name == "Australia") {
+                console.log(netValue, country.donated_amount, country.received_amount)
+              }
+              return color
+            } else {
+              return '#fafafa'
+            }
+          })
 
-        container.selectAll('received-circle')
-          .data(countries.filter(d => d.geo))
-          .enter()
-          .append('circle')
-          .attr('r', d => circleScale(d.received_amount))
-          .attr('cx', d => path.centroid(d.geo)[0])
-          .attr('cy', d => path.centroid(d.geo)[1])
-          .attr('fill', '#f00')
-          .attr('opacity', 0.5)
+        // Legend
+        const width = 260
+        const length = donatedColorScale.range().length
+
+        const x = d3.scaleLinear()
+            .domain([1, length - 1])
+            .rangeRound([width / length, width * (length - 1) / length])
+
+        let legend = container
+          .append('g')
+          .attr('class', 'legend')
+          .attr('transform', `translate(900, 750)`)
+
+        let donated = legend.append('g')
+          .attr('transform', `translate(${width}, 0)`)
+
+        donated.selectAll('rect')
+          .data(donatedColorScale.range())
+          .join('rect')
+            .attr('height', 8)
+            .attr('x', (d, i) => x(i))
+            .attr('width', (d, i) => x(i + 1) - x(i))
+            .attr('fill', d => d)
+
+        donated.append('text')
+            .attr('y', -6)
+            .attr('x', width)
+            .attr('fill', 'currentColor')
+            .attr('text-anchor', 'end')
+            .attr('font-weight', 'bold')
+            .text('Donated amount')
+
+        donated.call(d3.axisBottom(x)
+            .tickSize(13)
+            .tickFormat(i => `$${donatedColorScale.domain()[i - 1]/1e9}B`)
+            .tickValues(d3.range(1, length)))
+          .select('.domain')
+            .remove()
+
+        let received = legend.append('g')
+
+        received.selectAll('rect')
+          .data(receivedColorScale.range().reverse())
+          .join('rect')
+            .attr('height', 8)
+            .attr('x', (d, i) => x(i))
+            .attr('width', (d, i) => x(i + 1) - x(i))
+            .attr('fill', d => d)
+
+        received.append('text')
+            .attr('y', -6)
+            .attr('fill', 'currentColor')
+            .attr('text-anchor', 'start')
+            .attr('font-weight', 'bold')
+            .text('Received amount')
+
+        received.call(d3.axisBottom(x)
+            .tickSize(13)
+            .tickFormat(i => `$${receivedColorScale.domain().reverse()[i - 1]/1e9}B`)
+            .tickValues(d3.range(1, length)))
+          .select('.domain')
+            .remove()
       }
 
       function showData() {
-        let countries = groupByCountry(store.aiddata, store.geoJSON)
-        drawMap(countries, store.geoJSON);
+        let countries_list = groupByCountry(store.aiddata, store.geoJSON)
+        console.log(store)
+        drawDonationMap(store.geoJSON)
       }
 
       loadData().then(showData)
