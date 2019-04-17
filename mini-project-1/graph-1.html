@@ -137,17 +137,12 @@
           .domain(countries.map(d => d.country))
           .padding(0.2)
 
-        let yBarCategoryScale = d3.scaleBand()
-          .range([0, yScale.bandwidth()])
-          .domain(['donated', 'received'])
-          .padding(0.2)
-
-        return {xScale, xBarScale, yScale, yBarCategoryScale}
+        return {xScale, xBarScale, yScale}
       }
 
       function drawBarsCountriesChart(countries, scales, config) {
         let {margin, container} = config
-        let {xScale, xBarScale, yScale, yBarCategoryScale} = scales
+        let {xScale, xBarScale, yScale} = scales
         let body = container.append('g')
           .style('transform', `translate(${margin.left}px, ${margin.top}px)`)
 
