@@ -20,30 +20,30 @@
         justify-content: center;
       }
 
-      .legend {
+      .x-axis text,
+      .y-axis text,
+      .legend text {
+        color: #616161;
         font-size: 10px;
       }
 
-      .tick {
-        font-size: 10px;
+      .x-axis .tick line {
+        stroke: #aaa;
       }
 
-      .grid {
-        stroke-opacity: 0.25;
+      .y-axis .tick line,
+      .legend .tick line {
+        opacity: 0;
       }
 
-      .bar-chart-axes .y-axis text {
-        opacity: 0.4;
-      }
-
-      .horizon-chart-axes .x-axis .grid line {
+      .x-axis .grid line {
         stroke-dasharray: 5 5;
         opacity: 0.4;
       }
 
-      .bar-chart-axes .x-axis .grid line {
-        stroke-dasharray: 5 5;
-        opacity: 0.4;
+      .x-axis .domain,
+      .y-axis .domain {
+        opacity: 0;
       }
     </style>
     <script src="https://d3js.org/d3.v5.min.js"></script>
