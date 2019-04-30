@@ -32,7 +32,16 @@
         stroke-opacity: 0.25;
       }
 
-      .x-axis .grid line {
+      .bar-chart-axes .y-axis text {
+        opacity: 0.4;
+      }
+
+      .horizon-chart-axes .x-axis .grid line {
+        stroke-dasharray: 5 5;
+        opacity: 0.4;
+      }
+
+      .bar-chart-axes .x-axis .grid line {
         stroke-dasharray: 5 5;
         opacity: 0.4;
       }
@@ -41,9 +50,10 @@
   </head>
 
   <body>
-    <h1>Net Donations Through Years</h1>
+    <h1>United States Donations</h1>
     <div class="container">
       <svg id="horizon-chart"></svg>
+      <svg id="bar-chart"></svg>
     </div>
 
     <script type="text/javascript">
@@ -65,60 +75,33 @@
           return Math.max(+d.year, result)
         }, -Infinity)
 
-        let result = aidData.reduce((result, d) => {
-          let donor = result[d.donor] || {
-            country: d.donor,
-            donatedAmounts: {},
-            receivedAmounts: {},
-            netTotal: 0,
-          }
+        let result = aidData
+          .filter(d => d.donor === 'United States')
+          .reduce((result, d) => {
+            let recipient = result[d.recipient] || {
+              country: d.recipient,
+              receivedAmounts: {},
+              receivedTotal: 0,
+            }
 
-          let recipient = result[d.recipient] || {
-            country: d.recipient,
-            donatedAmounts: {},
-            receivedAmounts: {},
-            netTotal: 0,
-          }
+            let cumulativeReceivedAmount = recipient.receivedAmounts[d.year] || 0
+            cumulativeReceivedAmount += +d.commitment_amount_usd_constant
+            recipient.receivedAmounts[d.year] = cumulativeReceivedAmount
 
-          let cumulativeDonatedAmount = donor.donatedAmounts[d.year] || 0
-          cumulativeDonatedAmount += +d.commitment_amount_usd_constant
+            recipient.receivedTotal += +d.commitment_amount_usd_constant
 
-          let cumulativeReceivedAmount = recipient.receivedAmounts[d.year] || 0
-          cumulativeReceivedAmount += +d.commitment_amount_usd_constant
+            result[d.recipient] = recipient
 
-          donor.donatedAmounts[d.year] = cumulativeDonatedAmount
-          donor.netTotal += +d.commitment_amount_usd_constant
-
-          recipient.receivedAmounts[d.year] = cumulativeReceivedAmount
-          recipient.netTotal -= +d.commitment_amount_usd_constant
-
-          result[d.donor] = donor
-          result[d.recipient] = recipient
-
-          return result
-        }, {})
+            return result
+          }, {})
 
         result = Object.keys(result).map(key => result[key])
 
-        // Calculate net donations
         result.forEach(country => {
-          country.netDonations = []
-          country.donated = []
           country.received = []
 
           for (let year = startYear; year <= endYear; year++) {
-            country.donatedAmounts[year] = country.donatedAmounts[year] || 0
             country.receivedAmounts[year] = country.receivedAmounts[year] || 0
-
-            country.netDonations.push({
-              year: year,
-              value: country.donatedAmounts[year] - country.receivedAmounts[year]
-            })
-
-            country.donated.push({
-              year: year,
-              value: country.donatedAmounts[year]
-            })
 
             country.received.push({
               year: year,
@@ -127,7 +110,7 @@
           }
         })
 
-        result = result.sort((r1, r2) => d3.descending(r1.netTotal, r2.netTotal))
+        result = result.sort((r1, r2) => d3.descending(r1.receivedTotal, r2.receivedTotal))
 
         return result
       }
@@ -139,7 +122,7 @@
           top: 30,
           bottom: 20,
           left: 110,
-          right: 110
+          right: 0
         }
 
         let bodyHeight = height - margin.top - margin.bottom
@@ -150,135 +133,104 @@
           y: 0,
         }
 
-        let container = d3.select('#horizon-chart')
-        container
+        let horizonChartContainer = d3.select('#horizon-chart')
+        horizonChartContainer
           .attr('width', width)
           .attr('height', height)
 
-        return { width, height, margin, bodyHeight, bodyWidth, legendPosition, container }
-      }
+        let barChartContainer = d3.select('#bar-chart')
+        barChartContainer
+          .attr('width', width/3)
+          .attr('height', height)
 
-      function getValueRange(countries) {
-        return countries.reduce((result, country) => {
-          let donations = country.netDonations.map(d => d.value)
-          let minimum = d3.min(donations)
-          let maximum = d3.max(donations)
-
-          result[0] = Math.min(minimum, result[0])
-          result[1] = Math.max(maximum, result[1])
-          return result
-        }, [Infinity, -Infinity])
+        return { width, height, margin, bodyHeight, bodyWidth, legendPosition, horizonChartContainer, barChartContainer }
       }
 
       function getChartScales(countries, config) {
-        let maximumDonation = 12e9
+        let maximumTotalDonations = 17.5e9
+        let maximumSingleDonation = 7.5e9
         let numBands = 5
-        let bandMaximum = maximumDonation/numBands
+        let bandMaximum = maximumSingleDonation/numBands
 
         let countryScale = d3.scaleBand()
           .range([0, config.bodyHeight])
           .domain(countries.map(d => d.country))
           .padding(0.1)
 
-        let years = countries[0].netDonations.map(d => d.year)
-        let xScale = d3.scaleLinear()
+        let years = countries[0].received.map(d => d.year)
+        let xScaleHorizonChart = d3.scaleLinear()
           .range([0, config.bodyWidth])
           .domain([d3.min(years), d3.max(years)])
+
+        let xScaleBarChart = d3.scaleLinear()
+          .range([0, config.bodyWidth/3])
+          .domain([0, maximumTotalDonations])
 
         let yScale = d3.scaleLinear()
           .range([countryScale.bandwidth(), 0])
           .domain([0, bandMaximum])
 
-
-        console.log(d3.schemeBlues[numBands+1].slice(1, numBands+1))
-        let donatedColorScale = d3.scaleOrdinal()
+        let receivedColorScale = d3.scaleOrdinal()
           .range(d3.schemeBlues[numBands+2].slice(2, numBands+2))
           .domain(Array.from({length: numBands}, (v, k) => k))
 
-        let receivedColorScale = d3.scaleOrdinal()
-          .range(d3.schemeReds[numBands+2].slice(2, numBands+2))
-          .domain(Array.from({length: numBands}, (v, k) => k))
-
-        return { xScale, yScale, countryScale, donatedColorScale, receivedColorScale }
+        return { xScaleHorizonChart, xScaleBarChart, yScale, countryScale, receivedColorScale }
       }
 
-      function drawChart(countries, scales, config) {
-        let g = config.container
+      function drawHorizonChart(countries, scales, config) {
+        let g = config.horizonChartContainer
           .append('g')
           .style('transform', `translate(${config.margin.left}px, ${config.margin.top}px)`)
 
         countries.forEach(country => {
-          drawHorizonChart(country, scales, g)
+          let band = d3.max(scales.yScale.domain())
+          let segments = scales.receivedColorScale.domain().length
+
+          let countryContainer = g
+            .append('g')
+            .style('transform', `translate(0px, ${scales.countryScale(country.country)}px`)
+
+          let area = d3.area()
+            .x(d => scales.xScaleHorizonChart(d.year))
+            .y0(scales.yScale(0))
+
+          for (let i = 0; i < segments; i++) {
+            countryContainer
+              .append('path')
+              .datum(country.received)
+              .attr('d', area
+                .y1(d => {
+                  let value = d.value
+
+                  if (value > (i + 1)*band)
+                    return scales.yScale(band)
+                  else if (value < i*band)
+                    return scales.yScale(0)
+                  else
+                    return scales.yScale(value - i*band)
+                }))
+              .attr('stroke', 'none')
+              .attr('fill', scales.receivedColorScale(i))
+          }
+
+          countryContainer
+            .append('path')
+            .datum(country.received)
+            .attr('d', area
+              .y1(scales.yScale(0)))
+            .attr('stroke', '#eee')
         })
       }
 
-      function drawHorizonChart(country, scales, container) {
-        let band = d3.max(scales.yScale.domain())
-        let segments = scales.donatedColorScale.domain().length
-
-        let g = container
+      function drawHorizonChartAxes(scales, config) {
+        let g = config.horizonChartContainer
           .append('g')
-          .style('transform', `translate(0px, ${scales.countryScale(country.country)}px`)
+          .attr('class', 'horizon-chart-axes')
 
-        let area = d3.area()
-          .x(d => scales.xScale(d.year))
-          .y0(scales.yScale(0))
-
-        for (let i = 0; i < segments; i++) {
-          g
-            .append('path')
-            .datum(country.netDonations)
-            .attr('d', area
-              .y1(d => {
-                if (d.value > 0)
-                  return scales.yScale(0)
-
-                let value = Math.abs(d.value)
-
-                if (value > (i + 1)*band)
-                  return scales.yScale(band)
-                else if (value < i*band)
-                  return scales.yScale(0)
-                else
-                  return scales.yScale(value - i*band)
-              }))
-            .attr('stroke', 'none')
-            .attr('fill', scales.receivedColorScale(i))
-
-          g
-            .append('path')
-            .datum(country.netDonations)
-            .attr('d', area
-              .y1(d => {
-                if (d.value < 0)
-                  return scales.yScale(0)
-
-                let value = Math.abs(d.value)
-
-                if (value > (i + 1)*band)
-                  return scales.yScale(band)
-                else if (value < i*band)
-                  return scales.yScale(0)
-                else
-                  return scales.yScale(value - i*band)
-              }))
-            .attr('stroke', 'none')
-            .attr('fill', scales.donatedColorScale(i))
-        }
-
-        g
-          .append('path')
-          .datum(country.netDonations)
-          .attr('d', area
-            .y1(scales.yScale(0)))
-          .attr('stroke', '#eee')
-      }
-
-      function drawAxes(scales, config) {
         let axisX = d3
-          .axisBottom(scales.xScale)
+          .axisBottom(scales.xScaleHorizonChart)
           .tickFormat(d => d.toString())
-        config.container
+        g
           .append('g')
           .attr('class', 'x-axis')
           .style('transform', `translate(${config.margin.left}px, ${config.height - config.margin.bottom}px)`)
@@ -288,11 +240,9 @@
           .call(axisX
             .tickSize(-config.height + config.margin.top + config.margin.bottom, 0, 0)
             .tickFormat(''))
-          .select('.domain')
-            .remove()
 
         let axisY = d3.axisLeft(scales.countryScale)
-        config.container
+        g
           .append('g')
           .attr('class', 'y-axis')
           .style('transform', `translate(${config.margin.left}px, ${config.margin.top}px)`)
@@ -302,7 +252,7 @@
       function drawColorLegend(colorScale, scales, container, title) {
         const width = 150
         const rectHeight = 8
-        const titlePadding = 60
+        const titlePadding = 55
         const tickSize = 10
 
         let legendRectSize = 10
@@ -359,21 +309,87 @@
             .remove()
       }
 
-      function drawLegend(scales, config) {
-        let g = config.container
+      function drawHorizonChartLegend(scales, config) {
+        let g = config.horizonChartContainer
           .append('g')
           .attr('class', 'legend')
           .attr('transform', `translate(${config.legendPosition.x}, ${config.legendPosition.y})`)
 
-        let donatedContainer = g
-          .append('g')
-
         let receivedContainer = g
           .append('g')
-          .attr('transform', 'translate(300, 0)')
 
-        drawColorLegend(scales.donatedColorScale, scales, donatedContainer, 'Mostly Donor')
-        drawColorLegend(scales.receivedColorScale, scales, receivedContainer, 'Mostly Recipient')
+        drawColorLegend(scales.receivedColorScale, scales, receivedContainer, 'Donation Amount')
+      }
+
+      function drawBarChart(countries, scales, config) {
+        let yScale = scales.countryScale
+          .padding(0.25)
+
+        let bars = config.barChartContainer
+          .append('g')
+          .style('transform', `translate(10px, ${config.margin.top}px)`)
+          .selectAll('.bar')
+          .data(countries)
+          .enter()
+          .append('rect')
+          .attr('y', d => yScale(d.country))
+          .attr('height', yScale.bandwidth())
+          .attr('width', d => scales.xScaleBarChart(d.receivedTotal))
+          .attr('fill', '#9ecae1')
+      }
+
+      function drawBarChartAxes(scales, config) {
+        let g = config.barChartContainer
+          .append('g')
+          .attr('class', 'bar-chart-axes')
+
+        let axisX = d3
+          .axisBottom(scales.xScaleBarChart)
+          .ticks(5)
+          .tickFormat(d => `$${Math.abs(d)/1e9}B`)
+
+        g
+          .append('g')
+          .attr('class', 'x-axis')
+          .style('transform', `translate(10px, ${config.height - config.margin.bottom}px)`)
+          .call(axisX)
+          .append('g')
+          .attr('class', 'grid')
+          .call(axisX
+            .tickSize(-config.height + config.margin.top + config.margin.bottom, 0, 0)
+            .tickFormat(''))
+          .select('.domain')
+            .remove()
+
+        let axisY = d3.axisRight(scales.countryScale)
+        let leftAxis = g
+          .append('g')
+          .attr('class', 'y-axis')
+          .style('transform', `translate(10px, ${config.margin.top}px)`)
+          .call(axisY)
+
+        leftAxis
+          .select('.domain')
+          .remove()
+
+        leftAxis
+          .selectAll('line')
+          .attr('stroke', 'none')
+
+        leftAxis
+          .selectAll('text')
+          .attr('dx', -7)
+      }
+
+      function showHorizonChart(countries, scales, config) {
+        drawHorizonChart(countries, scales, config)
+        drawHorizonChartAxes(scales, config)
+        drawHorizonChartLegend(scales, config)
+      }
+
+      function showBarChart(countries, scales, config) {
+        drawBarChart(countries, scales, config)
+        drawBarChartAxes(scales, config)
       }
 
       function showData(store) {
@@ -381,11 +397,8 @@
         let countries = groupByCountry(store.aidData)
         let scales = getChartScales(countries, config)
 
-        console.log(countries)
-
-        drawChart(countries, scales, config)
-        drawAxes(scales, config)
-        drawLegend(scales, config)
+        showHorizonChart(countries, scales, config)
+        showBarChart(countries, scales, config)
       }
 
       loadData()
