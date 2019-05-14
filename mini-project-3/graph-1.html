@@ -8,7 +8,7 @@
       }
 
       h1 {
-        background-color: #2a5599;
+        background-color: #476b47;
         color: white;
         padding: 5px;
         text-align: center;
@@ -23,8 +23,9 @@
       .x-axis text,
       .y-axis text,
       .legend text {
-        color: #616161;
+        color: #3d3c3c;
         font-size: 10px;
+        text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
       }
 
       .x-axis text.title,
@@ -162,6 +163,29 @@
         return result
       }
 
+      function groupByCountry(aidData) {
+        let countries = aidData.reduce((result, d) => {
+          let donor = result[d.donor] || { donated: 0, received: 0 }
+          let recipient = result[d.recipient] || { donated: 0, received: 0 }
+
+          donor.donated += +d.commitment_amount_usd_constant
+          recipient.received += +d.commitment_amount_usd_constant
+
+          result[d.donor] = donor
+          result[d.recipient] = recipient
+          return result
+        }, {})
+
+        let countryNames = Object.keys(countries)
+        countryNames = countryNames.sort((r1, r2) => d3.ascending(getCountryOrder(r1), getCountryOrder(r2)) || d3.ascending(r1, r2))
+
+        let result = []
+        countryNames.forEach(countryName => {
+          result.push({ country: countryName, ...countries[countryName] })
+        })
+        return result
+      }
+
       function getChartConfig() {
         let width = 850
         let height = 850
@@ -198,7 +222,6 @@
       }
 
       function getChartScales(donations, config) {
-        console.log(getCountryNames(donations))
         let x = d3.scaleBand()
           .range([0, config.bodyWidth])
           .domain(getCountryNames(donations))
@@ -214,13 +237,10 @@
           .domain(getDonationsRange(donations))
           .interpolate(d3.interpolateHcl)
 
-        // let color = d3.scaleSequential(d3.interpolateBlues)
-        //   .domain(getDonationsRange(donations))
-
         return { x, y, color }
       }
 
-      function drawChart(donations, scales, config) {
+      function drawHeatMap(donations, scales, config) {
         let g = config.container
           .append('g')
           .style('transform', `translate(${config.margin.left}px, ${config.margin.top}px)`)
@@ -232,13 +252,60 @@
           .append('rect')
           .attr('x', d => scales.x(d.recipient))
           .attr('y', d => scales.y(d.donor))
-          .attr('width', d => scales.x.bandwidth())
-          .attr('height', d => scales.y.bandwidth())
+          .attr('width', scales.x.bandwidth())
+          .attr('height', scales.y.bandwidth())
           .style('fill', d => {
             if (d.amount === 0)
               return '#f5f5f5'
             return scales.color(d.amount)
           })
+      }
+
+      function drawBarChart(countries, scales, config) {
+        drawDonorsBarChart(countries, scales, config)
+        drawRecipientsBarChart(countries, scales, config)
+      }
+
+      function drawDonorsBarChart(countries, scales, config) {
+        let x = d3.scaleLinear()
+          .range([0, 100])
+          .domain([0, d3.max(countries.map(d => d.donated))])
+
+        let g = config.container
+          .append('g')
+          .style('transform', `translate(${config.margin.left - 108}px, ${config.margin.top}px)`)
+
+        g
+          .selectAll()
+          .data(countries)
+          .enter()
+          .append('rect')
+          .attr('x', d => 100 - x(d.donated))
+          .attr('y', d => scales.y(d.country))
+          .attr('width', d => x(d.donated))
+          .attr('height', scales.y.bandwidth())
+          .style('fill', '#9db79d')
+      }
+
+      function drawRecipientsBarChart(countries, scales, config) {
+        let y = d3.scaleLinear()
+          .range([0, 100])
+          .domain([0, d3.max(countries.map(d => d.received))])
+
+        let g = config.container
+          .append('g')
+          .style('transform', `translate(${config.margin.left}px, ${config.margin.top - 103}px)`)
+
+        g
+          .selectAll()
+          .data(countries)
+          .enter()
+          .append('rect')
+          .attr('x', d => scales.x(d.country))
+          .attr('y', d => 100 - y(d.received))
+          .attr('width', scales.x.bandwidth())
+          .attr('height', d => y(d.received))
+          .style('fill', '#9db79d')
       }
 
       function drawAxes(scales, config) {
@@ -254,7 +321,8 @@
         axisX
           .selectAll('text')
             .attr('transform', 'rotate(-90)')
-            .attr('dy', scales.x.bandwidth()/2 + 2)
+            .attr('dx', 4)
+            .attr('dy', scales.x.bandwidth()/2 + 6)
             .style('text-anchor', 'start')
 
         axisX
@@ -343,12 +411,12 @@
 
       function showData(store) {
         let donations = groupByDonations(store.aidData)
+        let countries = groupByCountry(store.aidData)
         let config = getChartConfig()
         let scales = getChartScales(donations, config)
 
-        console.log(donations.filter(d => d.donor === 'United States'))
-
-        drawChart(donations, scales, config)
+        drawHeatMap(donations, scales, config)
+        drawBarChart(countries, scales, config)
         drawAxes(scales, config)
         drawLegend(donations, scales, config)
       }
