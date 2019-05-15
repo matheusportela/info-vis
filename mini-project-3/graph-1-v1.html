@@ -8,7 +8,7 @@
       }
 
       h1 {
-        background-color: #476b47;
+        background-color: #2a5599;
         color: white;
         padding: 5px;
         text-align: center;
@@ -68,70 +68,8 @@
         })
       }
 
-      function getCountryOrder(countryName) {
-        let order = [
-          'United States',
-
-          'Japan',
-          'Germany',
-          'Austria',
-          'France',
-          'Italy',
-          'Spain',
-          'Greece',
-          'Australia',
-          'Belgium',
-          'Canada',
-          'Netherlands',
-          'Portugal',
-          'Switzerland',
-          'United Kingdom',
-          'Norway',
-          'Sweden',
-          'Finland',
-
-          'Luxembourg',
-          'Czech Republic',
-          'Ireland',
-          'New Zealand',
-          'South Korea',
-          'United Arab Emirates',
-          'Denmark',
-          'Poland',
-          'Liechtenstein',
-
-          'Colombia',
-          'Saudi Arabia',
-          'Slovakia',
-          'Chile',
-          'Brazil',
-          'Slovenia',
-
-          'Kuwait',
-          'Taiwan',
-          'Estonia',
-          'Iceland',
-          'Monaco',
-          'Thailand',
-          'Hungary',
-          'Qatar',
-          'Cyprus',
-
-          'Latvia',
-          'Lithuania',
-          'Romania',
-          'South Africa',
-          'India',
-        ]
-
-        let index = order.indexOf(countryName)
-        if (index == -1)
-          return Infinity
-        return index
-      }
-
-      function groupByDonations(aidData) {
-        let donations = aidData.reduce((result, d) => {
+      function groupByGraph(aidData) {
+        let countries = aidData.reduce((result, d) => {
           let donated = result[d.donor] || {}
           let received = result[d.recipient] || {}
 
@@ -144,54 +82,63 @@
           return result
         }, {})
 
-        let countryNames = Object.keys(donations)
-        countryNames = countryNames.sort((r1, r2) => d3.ascending(getCountryOrder(r1), getCountryOrder(r2)) || d3.ascending(r1, r2))
+        let countryTotal = aidData.reduce((result, d) => {
+          let donated = result[d.donor] || 0
+          let received = result[d.recipient] || 0
 
-        let result = []
-        countryNames.forEach(donor => {
-          countryNames.forEach(recipient => {
-            let amount = donations[donor][recipient] || 0
-            result.push({
-              donor: donor,
-              recipient: recipient,
-              amount: amount
-            })
-          })
-        })
+          donated += +d.commitment_amount_usd_constant
+          received -= +d.commitment_amount_usd_constant
 
-        return result
-      }
-
-      function groupByCountry(aidData) {
-        let countries = aidData.reduce((result, d) => {
-          let donor = result[d.donor] || { donated: 0, received: 0 }
-          let recipient = result[d.recipient] || { donated: 0, received: 0 }
-
-          donor.donated += +d.commitment_amount_usd_constant
-          recipient.received += +d.commitment_amount_usd_constant
-
-          result[d.donor] = donor
-          result[d.recipient] = recipient
+          result[d.donor] = donated
+          result[d.recipient] = received
           return result
         }, {})
 
-        let countryNames = Object.keys(countries)
-        countryNames = countryNames.sort((r1, r2) => d3.ascending(getCountryOrder(r1), getCountryOrder(r2)) || d3.ascending(r1, r2))
-
-        let result = []
-        countryNames.forEach(countryName => {
-          result.push({ country: countryName, ...countries[countryName] })
+        let nodes = []
+        Object.keys(countries).forEach(country => {
+          nodes.push({
+            id: country,
+            // total: d3.sum(Object.keys(countries[country]).map(c => countries[country][c]))
+            total: countryTotal[country]
+          })
         })
+        nodes = nodes.sort((r1, r2) => d3.descending(r1.total, r2.total))
+
+        orderedNodes = []
+        nodes.forEach((country, i) => {
+          if (i % 2 == 0)
+            orderedNodes.push(country)
+          else
+            orderedNodes.unshift(country)
+        })
+
+        console.log(orderedNodes)
+        nodes = orderedNodes
+
+        let links = []
+        nodes.forEach(donor => {
+          nodes.forEach(recipient => {
+            if (typeof countries[donor.id][recipient.id] !== 'undefined') {
+              links.push({
+                source: donor.id,
+                target: recipient.id,
+                value: countries[donor.id][recipient.id]
+              })
+            }
+          })
+        })
+
+        result = {nodes, links}
         return result
       }
 
       function getChartConfig() {
-        let width = 850
+        let width = 900
         let height = 850
         let margin = {
-          top: 150,
+          top: 10,
           bottom: 10,
-          left: 150,
+          left: 10,
           right: 10
         }
 
@@ -211,230 +158,137 @@
         return { width, height, margin, bodyHeight, bodyWidth, legendPosition, container }
       }
 
-      function getCountryNames(donations) {
-        return [...new Set(donations.map(d => d.donor))]
-      }
+      function drawChart(graph, scales, config) {
+        let graphRadius = 375
+        let nodeRadius = 20
 
-      function getDonationsRange(donations) {
-        let amounts = donations.map(d => d.amount)
-        // return [d3.min(amounts), d3.max(amounts)]
-        return [100e3, d3.max(amounts)]
-      }
+        let radius = d3.scaleLinear()
+          .range([1, 20])
+          .domain([0, 115e9])
 
-      function getChartScales(donations, config) {
-        let x = d3.scaleBand()
-          .range([0, config.bodyWidth])
-          .domain(getCountryNames(donations))
-          .padding(0.1)
+        let angle = d3.scaleBand()
+          .range([0, 360])
+          .domain(graph.nodes.map(d => d.id))
 
-        let y = d3.scaleBand()
-          .range([0, config.bodyHeight])
-          .domain(getCountryNames(donations))
-          .padding(0.1)
+        let width = d3.scaleLinear()
+          .range([0.05, 10])
+          .domain([0, 50e9])
 
-        let color = d3.scaleSqrt()
-          .range(['#e5f5e0', '#005a32'])
-          .domain(getDonationsRange(donations))
-          .interpolate(d3.interpolateHcl)
-
-        return { x, y, color }
-      }
-
-      function drawHeatMap(donations, scales, config) {
-        let g = config.container
-          .append('g')
-          .style('transform', `translate(${config.margin.left}px, ${config.margin.top}px)`)
-
-        g
-          .selectAll()
-          .data(donations)
-          .enter()
-          .append('rect')
-          .attr('x', d => scales.x(d.recipient))
-          .attr('y', d => scales.y(d.donor))
-          .attr('width', scales.x.bandwidth())
-          .attr('height', scales.y.bandwidth())
-          .style('fill', d => {
-            if (d.amount === 0)
-              return '#f5f5f5'
-            return scales.color(d.amount)
-          })
-      }
-
-      function drawBarChart(countries, scales, config) {
-        drawDonorsBarChart(countries, scales, config)
-        drawRecipientsBarChart(countries, scales, config)
-      }
-
-      function drawDonorsBarChart(countries, scales, config) {
-        let x = d3.scaleLinear()
-          .range([0, 100])
-          .domain([0, d3.max(countries.map(d => d.donated))])
+        let simulation = d3
+          .forceSimulation()
+          .force('link', d3.forceLink().id(d => d.id))
+          .force('charge', d3.forceManyBody())
+          .force('center', d3.forceCenter(config.bodyWidth/2, config.bodyHeight/2))
 
         let g = config.container
           .append('g')
-          .style('transform', `translate(${config.margin.left - 108}px, ${config.margin.top}px)`)
-
-        g
-          .selectAll()
-          .data(countries)
-          .enter()
-          .append('rect')
-          .attr('x', d => 100 - x(d.donated))
-          .attr('y', d => scales.y(d.country))
-          .attr('width', d => x(d.donated))
-          .attr('height', scales.y.bandwidth())
-          .style('fill', '#9db79d')
-      }
-
-      function drawRecipientsBarChart(countries, scales, config) {
-        let y = d3.scaleLinear()
-          .range([0, 100])
-          .domain([0, d3.max(countries.map(d => d.received))])
-
-        let g = config.container
-          .append('g')
-          .style('transform', `translate(${config.margin.left}px, ${config.margin.top - 103}px)`)
-
-        g
-          .selectAll()
-          .data(countries)
-          .enter()
-          .append('rect')
-          .attr('x', d => scales.x(d.country))
-          .attr('y', d => 100 - y(d.received))
-          .attr('width', scales.x.bandwidth())
-          .attr('height', d => y(d.received))
-          .style('fill', '#9db79d')
-      }
-
-      function drawAxes(scales, config) {
-        let axisX = config.container
-          .append('g')
-          .attr('class', 'x-axis')
-          .style('transform', `translate(${config.margin.left}px, ${config.margin.top}px)`)
-
-        axisX
-          .call(d3
-            .axisTop(scales.x))
-
-        axisX
-          .selectAll('text')
-            .attr('transform', 'rotate(-90)')
-            .attr('dx', 4)
-            .attr('dy', scales.x.bandwidth()/2 + 6)
-            .style('text-anchor', 'start')
-
-        axisX
-          .append('text')
-          .attr('class', 'title')
-          .attr('x', config.bodyWidth/2)
-          .attr('dy', -120)
-          .style('fill', 'currentColor')
-          .text('Recipients')
-
-        let axisY = config.container
-          .append('g')
-          .attr('class', 'y-axis')
-          .style('transform', `translate(${config.margin.left}px, ${config.margin.top}px)`)
-
-        axisY
-          .call(d3
-            .axisLeft(scales.y))
-
-        axisY
-          .append('text')
-          .attr('class', 'title')
-          .attr('x', -config.bodyHeight/2)
-          .attr('dy', -120)
-          .attr('transform', 'rotate(-90)')
-          .style('fill', 'currentColor')
-          .text('Donors')
-      }
-
-      function drawLegend(donations, scales, config) {
-        let legendWidth = 200
-        let legendHeight = 10
-
-        let g = config.container
-          .append('g')
-          .attr('class', 'legend')
-          .attr('transform', `translate(${config.legendPosition.x}, ${config.legendPosition.y})`)
+          .attr('transform', `translate(${config.bodyWidth/2}, ${config.bodyHeight/2})`)
 
         let defs = g
           .append('defs')
 
-        let linearGradient = defs
-          .append('linearGradient')
-            .attr('id', 'linear-gradient')
-            .attr('x1', '0%')
-            .attr('y1', '0%')
-            .attr('x2', '100%')
-            .attr('y2', '0%')
-
-        linearGradient
-          .append('stop')
-            .attr('offset', '0%')
-            .attr('stop-color', scales.color.range()[0])
-
-        linearGradient
-          .append('stop')
-            .attr('offset', '100%')
-            .attr('stop-color', scales.color.range()[1])
-
-        g
-          .append('rect')
-            .attr('width', legendWidth)
-            .attr('height', legendHeight)
-            .style('fill', 'url(#linear-gradient)')
-
-        let ticks = d3.scaleSqrt()
-          .range([0, legendWidth])
-          .domain(getDonationsRange(donations))
-
-        g
+        let links = g
           .append('g')
-          .attr('class', 'legend-axis')
-          .attr('transform', `translate(0, 5)`)
-          .call(d3.axisBottom(ticks)
-            .ticks(5)
-            .tickFormat(function(value) {
-              let formattedValue
+          .attr('class', 'links')
+          .selectAll('line')
+          .data(graph.links)
+          .enter()
+          .append('line')
+          .attr('stroke-width', d => width(d.value))
+          .attr('x1', d => graphRadius*Math.cos(angle(d.source) * Math.PI/180))
+          .attr('y1', d => graphRadius*Math.sin(angle(d.source) * Math.PI/180))
+          .attr('x2', d => graphRadius*Math.cos(angle(d.target) * Math.PI/180))
+          .attr('y2', d => graphRadius*Math.sin(angle(d.target) * Math.PI/180))
+          .attr('opacity', 0.75)
+          // .style('stroke', 'black')
+          .attr('stroke', d => {
+            let id = `S${d.source.replace(/\s/g, '')}T${d.target.replace(/\s/g, '')}`
+            let gradient = defs
+              .append('linearGradient')
+                .attr('id', id)
+                .attr('gradientUnits', 'userSpaceOnUse')
+                .attr('x1', graphRadius*Math.cos(angle(d.source) * Math.PI/180))
+                .attr('y1', graphRadius*Math.sin(angle(d.source) * Math.PI/180))
+                .attr('x2', graphRadius*Math.cos(angle(d.target) * Math.PI/180))
+                .attr('y2', graphRadius*Math.sin(angle(d.target) * Math.PI/180))
 
-              if (value >= 1e12)
-                formattedValue = `$${value/1e12}T`
-              else if (value >= 1e9)
-                formattedValue = `$${value/1e9}B`
-              else if (value >= 1e6)
-                formattedValue = `$${value/1e6}M`
-              else if (value >= 1e3)
-                formattedValue = `$${value/1e3}K`
-              else
-                formattedValue = `$${value}`
+            gradient
+              .append('stop')
+                .attr('offset', '0%')
+                .attr('stop-color', '#3C8ADF')
 
-              return formattedValue
-            }))
-          .select('.domain')
-            .remove()
+            gradient
+              .append('stop')
+                .attr('offset', '100%')
+                .attr('stop-color', '#EF553C')
 
-        g
+            return `url(#${id})`
+          })
+
+        let nodes = g
+          .append('g')
+          .attr('class', 'nodes')
+          .selectAll('circle')
+          .data(graph.nodes)
+          .enter()
+          .append('g')
+          .attr('class', 'country')
+          .attr('transform', d => {
+            let x = graphRadius*Math.cos(angle(d.id) * Math.PI/180)
+            let y = graphRadius*Math.sin(angle(d.id) * Math.PI/180)
+            return `translate(${x}, ${y})`
+          })
+
+        nodes
+          .append('circle')
+          .attr('r', d => radius(Math.abs(d.total)))
+          // .attr('r', d => 10)
+          .attr('fill', d => d.total > 0 ? '#3C8ADF' : '#EF553C')
+
+        nodes
           .append('text')
-          .attr('class', 'legend-title')
-          .attr('dy', -3)
-          .style('fill', 'currentColor')
-          .text('Donations (US dollars)')
+          .text(d => d.id)
+          .style('color', '#fff')
+          .style('text-anchor', 'middle')
+          .style('font-size', '10px')
+          .attr('transform', d => {
+            let x = 25*Math.cos(angle(d.id) * Math.PI/180)
+            let y = 25*Math.sin(angle(d.id) * Math.PI/180)
+            return `translate(${x}, ${y})`
+          })
+          // .attr('dx', 20)
+          // .attr('dy', 20)
+
+        // nodes
+        //   .append('title')
+        //   .text(d => d.id)
+
+        // simulation
+        //   .nodes(graph.nodes)
+        //   .on('tick', () => {
+        //     links
+        //       .attr('x1', d => d.source.x)
+        //       .attr('y1', d => d.source.y)
+        //       .attr('x2', d => d.target.x)
+        //       .attr('y2', d => d.target.y)
+
+        //     nodes
+        //       .attr('transform', d => `translate(${d.x}, ${d.y})`)
+        //   })
+
+        // simulation
+        //   .force('link')
+        //   .links(graph.links)
       }
 
       function showData(store) {
-        let donations = groupByDonations(store.aidData)
-        let countries = groupByCountry(store.aidData)
+        let graph = groupByGraph(store.aidData)
+        let scales = null
         let config = getChartConfig()
-        let scales = getChartScales(donations, config)
 
-        drawHeatMap(donations, scales, config)
-        drawBarChart(countries, scales, config)
-        drawAxes(scales, config)
-        drawLegend(donations, scales, config)
+        console.log(graph)
+
+        drawChart(graph, scales, config)
       }
 
       loadData()
